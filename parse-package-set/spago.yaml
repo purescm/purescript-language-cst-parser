@@ -1,0 +1,24 @@
+package:
+  name: parse-package-set
+  dependencies:
+    - aff
+    - arrays
+    - avar
+    - console
+    - datetime
+    - effect
+    - either
+    - exceptions
+    - filterable
+    - foldable-traversable
+    - language-cst-parser
+    - maybe
+    - newtype
+    - node-buffer
+    - node-execa
+    - node-fs
+    - node-path
+    - numbers
+    - parallel
+    - prelude
+    - strings

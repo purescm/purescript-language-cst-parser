@@ -25,10 +25,9 @@ import Effect.AVar as EffectAVar
 import Effect.Aff (Aff, runAff_)
 import Effect.Aff.AVar as AVar
 import Effect.Class (liftEffect)
-import Effect.Console as Console
+import Effect.Class.Console as Console
 import Effect.Exception (throwException)
-import Node.Buffer as Buffer
-import Node.ChildProcess as Exec
+import Node.Library.Execa as Exec
 import Node.Encoding (Encoding(..))
 import Node.FS.Aff (readTextFile, readdir, stat, writeTextFile)
 import Node.FS.Stats as FS
@@ -49,14 +48,15 @@ main :: Effect Unit
 main = runAff_ (either throwException mempty) do
   tmpPath <- liftEffect $ tmpdir "cst-integration-"
 
-  writeTextFile UTF8 (tmpPath <> "/spago.dhall") defaultSpagoDhall
+  writeTextFile UTF8 (tmpPath <> "/spago.yaml") defaultSpagoConfig
 
-  let execOpts = Exec.defaultExecSyncOptions { cwd = Just tmpPath }
-  s <- liftEffect $ Buffer.toString UTF8 =<< Exec.execSync "spago ls packages" execOpts
-  let lines = Str.split (Str.Pattern "\n") s
-  let packages = Str.joinWith " " (String.takeWhile (_ /= ' ') <$> lines)
-  _ <- liftEffect $ Exec.execSync ("spago install " <> packages) execOpts
+  Console.log "Installing packages..."
+  let execOpts = _ { cwd = Just tmpPath }
+  execResult <- liftEffect $ Exec.execaSync "bash" ["-c", "spago ls packages --json | jq 'keys | .[]' -r"] execOpts
+  let lines = Str.split (Str.Pattern "\n") execResult.stdout
+  _ <- liftEffect $ Exec.execaSync "spago" (["install"] <> lines) execOpts
 
+  Console.log "Packages installed. Reading purescript files..."
   pursFiles <- getPursFiles 0 (tmpPath <> "/.spago")
 
   block <- AVar.empty
@@ -77,7 +77,7 @@ main = runAff_ (either throwException mempty) do
       else
         Left { path, errors, duration }
 
-  liftEffect $ forWithIndex_ partition.left \ix failed -> do
+  forWithIndex_ partition.left \ix failed -> do
     let
       message = Array.intercalate "\n"
         [ "---- [Error " <> show (ix + 1) <> " of " <> show (Array.length partition.left) <> ". Failed in " <> formatMs failed.duration <> " ] ----"
@@ -101,8 +101,8 @@ main = runAff_ (either throwException mempty) do
       , "modules."
       ]
 
-  liftEffect $ Console.log successMessage
-  liftEffect $ Console.log $ displayDurationStats (getDurationStats partition.right) "Success Case"
+  Console.log successMessage
+  Console.log $ displayDurationStats (getDurationStats partition.right) "Success Case"
 
   let
     printerSucceeded = Array.filter (_.printerMatches >>> eq (Just true)) partition.right
@@ -115,7 +115,7 @@ main = runAff_ (either throwException mempty) do
       , "successully parsed modules."
       ]
 
-  liftEffect $ Console.log printerSuccessMessage
+  Console.log printerSuccessMessage
 
   let
     printerFailed = Array.filter (_.printerMatches >>> eq (Just false)) partition.right
@@ -128,7 +128,7 @@ main = runAff_ (either throwException mempty) do
       , "successfully parsed modules."
       ]
 
-  unless (Array.null printerFailed) $ liftEffect do
+  unless (Array.null printerFailed) do
     Console.error printerFailedMessage
     forWithIndex_ printerFailed \ix failed -> do
       let
@@ -142,7 +142,7 @@ main = runAff_ (either throwException mempty) do
   let
     mods = Array.mapMaybe _.mbModule moduleResults
 
-  liftEffect case sortModules identity mods of
+  case sortModules identity mods of
     Sorted sorted -> Console.log $ Array.intercalate " "
       [ "Successfully sorted module graph for"
       , show (Array.length sorted)
@@ -154,13 +154,14 @@ main = runAff_ (either throwException mempty) do
       [ "Error: cycle detected in module graph"
       ]
 
-defaultSpagoDhall :: String
-defaultSpagoDhall = Array.intercalate "\n"
-  [ "{ name = \"test-parser\""
-  , ", dependencies = [] : List Text"
-  , ", packages = https://github.com/purescript/package-sets/releases/download/psc-0.15.7-20230401/packages.dhall sha256:d385eeee6ca160c32d7389a1f4f4ee6a05aff95e81373cdc50670b436efa1060"
-  , ", sources = [] : List Text"
-  , "}"
+defaultSpagoConfig :: String
+defaultSpagoConfig = Array.intercalate "\n"
+  [ "package:"
+  , "  name: test-parser"
+  , "  dependencies: []"
+  , "workspace:"
+  , "  packageSet:"
+  , "    registry: 53.2.0"
   ]
 
 getPursFiles :: Int -> FilePath -> Aff (Array FilePath)
